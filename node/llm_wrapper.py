@@ -1,5 +1,7 @@
 import llama_cpp
 from typing import List
+import asyncio
+from functools import partial
 
 class LLMWrapper:
     def __init__(self, model_path: str, max_tokens: int = 256, device: str = 'cuda', **kwargs):
@@ -13,19 +15,23 @@ class LLMWrapper:
             n_ctx=2048,
             n_gpu_layers=n_gpu_layers,
             n_threads=4,
+            verbose=False,
             **kwargs
         )
         
-    def generate(self, prompt: str,max_tokens: int = None, temperature: float = 0.7,stop: List[str] = None) -> dict:
+    async def generate(self, prompt: str,max_tokens: int = None, temperature: float = 0.7,stop: List[str] = None) -> dict:
+        loop = asyncio.get_running_loop()
         if max_tokens is None:
             max_tokens = self.max_tokens
-        response = self.llm(
-            prompt,
+        func = partial(
+            self.llm,
+            prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,
             stop=stop
         )
-        return response
+        result = await loop.run_in_executor(None, func)
+        return result
     
     def close(self):
         self.llm.close()

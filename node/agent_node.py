@@ -4,6 +4,8 @@ import json
 import uuid
 import logging
 from datetime import datetime
+from llm_wrapper import LLMWrapper
+import time
 
 # 导入协议消息类
 from shared.protocol import (
@@ -22,8 +24,13 @@ HEARTBEAT_INTERVAL = 10                    # 心跳间隔（秒）
 NODE_ID = f"node_{uuid.uuid4().hex[:6]}"   # 唯一节点ID
 
 # 节点声称的能力（可根据实际修改）
-CAPABILITIES = ["llm", "dummy"]            # dummy 表示当前是模拟推理
+CAPABILITIES = ["llm"]            # dummy 表示当前是模拟推理
 
+# 最大并发任务数
+MAX_CONCURRENT = 1
+sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+MODELPATH = r"./model/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
 
 # ===== 心跳发送任务 =====
 async def send_heartbeat(websocket):
@@ -36,12 +43,51 @@ async def send_heartbeat(websocket):
         await websocket.send(hb_msg.model_dump_json())
         logger.debug(f"Heartbeat sent, load={load}")
 
+async def process_task(websocket, task: TaskAssignment, llm: LLMWrapper):  
+    try:
+        response = await asyncio.wait_for(
+            llm.generate(
+                prompt=task.prompt, 
+                max_tokens=task.max_tokens,
+                temperature=task.temperature), 
+                timeout=task.max_latency_ms / 1000.0)
+        generated_text = response['choices'][0]["text"].strip()                
+        result = NodeResult(
+                task_id=task.task_id,
+                node_id=NODE_ID,
+                request_id=task.request_id,
+                status="success",
+                result=generated_text,       # 模拟耗时
+                )
+    except asyncio.TimeoutError:
+        result = NodeResult(
+            task_id=task.task_id,
+            node_id=NODE_ID,
+            request_id=task.request_id,
+            status="failure",
+            result="",
+            error_msg="LLM generation timeout"
+        )    
+    except Exception as e:
+        result = NodeResult(
+            task_id=task.task_id,
+            node_id=NODE_ID,
+            request_id=task.request_id,
+            status="failure",
+            result="",
+            error_msg=str(e)
+        )
+    # 发送结果
+    await websocket.send(result.model_dump_json())
+    logger.info(f"Sent result for task {task.task_id}")
+
 
 # ===== 主函数 =====
 async def main():
+    llm = LLMWrapper(model_path=MODELPATH)
     # 连接 Host
     async with websockets.connect(HOST_URI) as websocket:
-        # 1. 发送注册消息
+        # 发送注册消息
         register_msg = RegisterNodeMessage(
             node_id=NODE_ID,
             capabilities=CAPABILITIES
@@ -49,37 +95,20 @@ async def main():
         await websocket.send(register_msg.model_dump_json())
         logger.info(f"Registered with node_id={NODE_ID}")
 
-        # 2. 启动心跳任务
+        # 启动心跳任务
         heartbeat_task = asyncio.create_task(send_heartbeat(websocket))
 
-        # 3. 接收并处理消息（主要是 TaskAssignment）
+        # 接收并处理消息（主要是 TaskAssignment）
         try:
             async for raw_message in websocket:
                 data = json.loads(raw_message)
                 msg_type = data.get("type")
 
                 if msg_type == "task_assignment":
-                    # 解析任务
-                    task = TaskAssignment.model_validate(data)
-                    logger.info(f"Received task {task.task_id} for request {task.request_id}")
-
-                    # TODO: 在这里实现真正的推理（或模拟）
-                    # 当前为 dummy 实现：固定回复 + 模拟延迟
-                    await asyncio.sleep(0.5)   # 模拟计算耗时
-                    dummy_reply = f"[Dummy] 收到 prompt: {task.prompt[:50]}..."
-                    
-                    # 构造结果消息
-                    result = NodeResult(
-                        task_id=task.task_id,
-                        node_id=NODE_ID,
-                        request_id=task.request_id,
-                        status="success",
-                        result=dummy_reply,
-                        latency_ms=500,       # 模拟耗时
-                    )
-                    # 发送结果
-                    await websocket.send(result.model_dump_json())
-                    logger.info(f"Sent result for task {task.task_id}")
+                    async with sem:
+                        task = TaskAssignment.model_validate(data)
+                        await process_task(websocket, task, llm)
+                        
 
                 elif msg_type == "error":
                     # 可选：处理来自 Host 的错误消息
