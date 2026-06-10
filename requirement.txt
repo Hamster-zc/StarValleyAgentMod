@@ -1,2 +1,3 @@
 pydantic
 websockets
+llama-cpp-python
