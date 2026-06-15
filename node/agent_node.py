@@ -4,7 +4,7 @@ import json
 import uuid
 import logging
 from datetime import datetime
-from llm_wrapper import LLMWrapper
+from .llm_wrapper import LLMWrapper
 import time
 
 # 导入协议消息类
@@ -57,8 +57,10 @@ async def process_task(websocket, task: TaskAssignment, llm: LLMWrapper):
                 node_id=NODE_ID,
                 request_id=task.request_id,
                 status="success",
-                result=generated_text,       # 模拟耗时
+                result=generated_text,
+                citations=task.memory_ids
                 )
+        logger.info(f"DEBUG: task.memory_ids = {task.memory_ids}")
     except asyncio.TimeoutError:
         result = NodeResult(
             task_id=task.task_id,

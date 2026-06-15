@@ -5,9 +5,13 @@ from shared.protocol import *
 import logging
 from datetime import datetime
 import websockets.exceptions
+from host.short_memory_injection import build_prompt_with_memory
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+DB_PATH = r"storage/npc_memory.db"
 
 # 存储节点信息
 nodes = {}  # node_id -> {"websocket": websocket, "capabilities": [], "last_heartbeat": datetime, "load": 0.0}
@@ -69,8 +73,14 @@ async def client_handler(websocket, path):
                 if "llm" in node_info["capabilities"]:
                     found = True
                     task_id = f"task_{client_msg.request_id}"
-                    # 临时prompt构造，实际需要host进行rag等操作后拼装得到
-                    temp_prompt = f"NPC: {client_msg.npc_id}\n" + "\n".join([f"{msg['role']}: {msg['content']}" for msg in client_msg.context])
+                    # 构建包含短期记忆的提示词
+                    temp_prompt, memory_ids = build_prompt_with_memory(
+                        db_path= DB_PATH,
+                        npc_id=client_msg.npc_id,
+                        game_day=client_msg.game_day,
+                        context=client_msg.context
+                    )
+                    logger.info(f"DEBUG: memory_ids = {memory_ids}")
                     task_msg = TaskAssignment(
                         task_id=task_id,
                         node_id=node_id,
@@ -79,7 +89,8 @@ async def client_handler(websocket, path):
                         max_tokens=256,
                         temperature=0.7,
                         model="gpt-4",
-                        max_latency_ms=25000
+                        max_latency_ms=25000,
+                        memory_ids=memory_ids
                     )
                     await node_info["websocket"].send(task_msg.model_dump_json())
                     logger.info(f"Task {task_id} assigned to node {node_id}")
@@ -92,7 +103,8 @@ async def client_handler(websocket, path):
                         await websocket.send(json.dumps({
                             "type": "client_response",
                             "request_id": client_msg.request_id,
-                            "result": result_msg.result
+                            "result": result_msg.result,
+                            "citations": result_msg.citations 
                         }))
                     except asyncio.TimeoutError:
                         # 超时，降级回复

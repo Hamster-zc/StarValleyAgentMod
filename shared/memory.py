@@ -7,7 +7,7 @@ def init_db(db_path:str) -> None:
     """读取 storage/sqlite_schema.sql 文件，执行建表语句。"""
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    with open('storage/sqlite_schema.sql', 'r') as f:
+    with open('storage/sqlite_schema.sql', 'r', encoding='utf-8') as f:
         sql_script = f.read()
     cursor.executescript(sql_script)
     conn.commit()
@@ -45,7 +45,7 @@ def query_recent_turns(db_path: str, npc_id: str, game_day: int, limit: int = 20
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT request_id, npc_id, player_id, role, text, game_day
+        SELECT id, request_id, npc_id, player_id, role, text, game_day
         FROM conversation_turns
         WHERE npc_id = ? AND game_day = ?
         ORDER BY timestamp DESC
@@ -55,12 +55,13 @@ def query_recent_turns(db_path: str, npc_id: str, game_day: int, limit: int = 20
     conn.close()
     return [
         {
-            'request_id': row[0],
-            'npc_id': row[1],
-            'player_id': row[2],
-            'role': row[3],
-            'text': row[4],
-            'game_day': row[5]
+            'id': row[0],
+            'request_id': row[1],
+            'npc_id': row[2],
+            'player_id': row[3],
+            'role': row[4],
+            'text': row[5],
+            'game_day': row[6]
         }
         for row in rows
     ]

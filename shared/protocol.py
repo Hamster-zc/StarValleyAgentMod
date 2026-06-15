@@ -63,6 +63,7 @@ class TaskAssignment(BaseMessage):
     temperature: float = Field(ge=0.0, le=1.0, default=0.7)
     model: Optional[str] = None  # 可选的模型名称，例如 "gpt-4"
     max_latency_ms: Optional[float] = 25000  # 可选的最大延迟要求，单位毫秒
+    memory_ids: List[str] = Field(default_factory=list)
 
 class NodeResult(BaseMessage):
     """
@@ -76,6 +77,7 @@ class NodeResult(BaseMessage):
     result: str = ""
     error_msg: Optional[str] = None
     latency_ms: Optional[float] = None  # 可选的实际延迟，单位毫秒     
+    citations: List[str] = Field(default_factory=list)  # 引用来源
 
 class ErrorMessage(BaseMessage):
     """
