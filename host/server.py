@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 import websockets.exceptions
 from host.short_memory_injection import build_prompt_with_memory
+import shared.memory as memory_utils
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,6 +82,16 @@ async def client_handler(websocket, path):
                         context=client_msg.context
                     )
                     logger.info(f"DEBUG: memory_ids = {memory_ids}")
+                    memory_utils.append_turn(
+                        db_path=DB_PATH,
+                        turn={
+                            "request_id": client_msg.request_id,
+                            "npc_id": client_msg.npc_id,
+                            "player_id": client_msg.player_id,
+                            "role": "user",
+                            "text": client_msg.context[-1]["content"] if client_msg.context else "",
+                            "game_day": client_msg.game_day
+                        })
                     task_msg = TaskAssignment(
                         task_id=task_id,
                         node_id=node_id,
@@ -106,6 +117,17 @@ async def client_handler(websocket, path):
                             "result": result_msg.result,
                             "citations": result_msg.citations 
                         }))
+                        memory_utils.append_turn(
+                            db_path=DB_PATH,
+                            turn={
+                                "request_id": client_msg.request_id,
+                                "npc_id": client_msg.npc_id,
+                                "player_id": client_msg.player_id,
+                                "role": "assistant",
+                                "text": result_msg.result,
+                                "game_day": client_msg.game_day
+                            }
+                        )
                     except asyncio.TimeoutError:
                         # 超时，降级回复
                         await websocket.send(json.dumps({
