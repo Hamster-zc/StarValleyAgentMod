@@ -7,12 +7,24 @@ from datetime import datetime
 import websockets.exceptions
 from host.short_memory_injection import build_prompt_with_memory
 import shared.memory as memory_utils
+from rag.faiss_index import FaissIndex
+from rag.embedding import EmbeddingModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 DB_PATH = r"storage/npc_memory.db"
+EMBEDDING_MODEL = EmbeddingModel()
+FAISS_INDEX = FaissIndex(embedding_model=EMBEDDING_MODEL, index_path="storage/faiss_index.index", metadata_path="storage/metadata.json")
+
+try:
+    FAISS_INDEX.load_index()
+    logger.info("FAISS index loaded")
+except FileNotFoundError:
+    logger.warning("FAISS index not found. Please run build_index first.")
+except Exception as e:
+    logger.warning(f"FAISS index load error: {e}")
 
 # 存储节点信息
 nodes = {}  # node_id -> {"websocket": websocket, "capabilities": [], "last_heartbeat": datetime, "load": 0.0}
@@ -74,6 +86,7 @@ async def client_handler(websocket, path):
                 if "llm" in node_info["capabilities"]:
                     found = True
                     task_id = f"task_{client_msg.request_id}"
+                    user_text = client_msg.context[-1]["content"] if client_msg.context else ""
                     memory_utils.append_turn(
                         db_path=DB_PATH,
                         turn={
@@ -81,23 +94,55 @@ async def client_handler(websocket, path):
                             "npc_id": client_msg.npc_id,
                             "player_id": client_msg.player_id,
                             "role": "user",
-                            "text": client_msg.context[-1]["content"] if client_msg.context else "",
+                            "text": user_text,
                             "game_day": client_msg.game_day
                         })
-                    # 构建包含长短期记忆的提示词
+                    
+                    # ---- 长期记忆检索（带阈值过滤） ----
+                    long_term_results = []
+                    if FAISS_INDEX.index is not None:
+                        try:
+                            raw_results = FAISS_INDEX.search(user_text, top_k=5)
+                            # 过滤相似度阈值（score 对于 IndexFlatIP 是余弦相似度，范围 [-1,1]）
+                            SCORE_THRESHOLD = 0.5
+                            filtered = [r for r in raw_results if r.get("score", 0) >= SCORE_THRESHOLD]
+                            long_term_results = filtered
+                            if filtered:
+                                logger.info(f"Long-term memories found: {len(filtered)} items")
+                            else:
+                                logger.info("No long-term memory above threshold")
+                        except Exception as e:
+                            logger.warning(f"Long-term search failed: {e}")
+                    else:
+                        logger.warning("FAISS index not loaded, skip long-term retrieval")
+
+                    # ---- 构建短期记忆 prompt ----
                     temp_prompt, memory_ids = build_prompt_with_memory(
-                        db_path= DB_PATH,
+                        db_path=DB_PATH,
                         npc_id=client_msg.npc_id,
                         game_day=client_msg.game_day,
-                        context=client_msg.context
+                        context=client_msg.context,
+                        max_memory_items=6
                     )
-                    logger.info(f"DEBUG: memory_ids = {memory_ids}")
+
+                    # ---- 合并长期记忆到 prompt ----
+                    if long_term_results:
+                        # 拼接长期记忆文本（只显示文本，不含 role，因为 metadata 无 role）
+                        long_texts = [f"- {item['text']}" for item in long_term_results]
+                        long_section = "以下是与NPC的长期记忆相关的内容：\n" + "\n".join(long_texts) + "\n\n"
+                        final_prompt = long_section + temp_prompt
+                        # 合并 ID
+                        long_ids = [item["id"] for item in long_term_results]
+                        memory_ids.extend(long_ids)
+                        logger.info(f"Long-term IDs added: {long_ids}")
+                    else:
+                        final_prompt = temp_prompt
 
                     task_msg = TaskAssignment(
                         task_id=task_id,
                         node_id=node_id,
                         request_id=client_msg.request_id,
-                        prompt = temp_prompt,
+                        prompt = final_prompt,
                         max_tokens=256,
                         temperature=0.7,
                         model="gpt-4",
