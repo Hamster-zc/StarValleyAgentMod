@@ -2,6 +2,8 @@ import sqlite3
 from typing import List, Tuple
 from shared.protocol import ClientRequest
 from shared.memory import query_recent_turns
+from rag.faiss_index import FaissIndex
+from rag.embedding import EmbeddingModel
 
 def build_prompt_with_memory(db_path, npc_id, game_day, context, max_memory_items=6) -> Tuple[str, List[str]]:
     """

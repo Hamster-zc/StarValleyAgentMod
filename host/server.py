@@ -74,14 +74,6 @@ async def client_handler(websocket, path):
                 if "llm" in node_info["capabilities"]:
                     found = True
                     task_id = f"task_{client_msg.request_id}"
-                    # 构建包含短期记忆的提示词
-                    temp_prompt, memory_ids = build_prompt_with_memory(
-                        db_path= DB_PATH,
-                        npc_id=client_msg.npc_id,
-                        game_day=client_msg.game_day,
-                        context=client_msg.context
-                    )
-                    logger.info(f"DEBUG: memory_ids = {memory_ids}")
                     memory_utils.append_turn(
                         db_path=DB_PATH,
                         turn={
@@ -92,6 +84,15 @@ async def client_handler(websocket, path):
                             "text": client_msg.context[-1]["content"] if client_msg.context else "",
                             "game_day": client_msg.game_day
                         })
+                    # 构建包含长短期记忆的提示词
+                    temp_prompt, memory_ids = build_prompt_with_memory(
+                        db_path= DB_PATH,
+                        npc_id=client_msg.npc_id,
+                        game_day=client_msg.game_day,
+                        context=client_msg.context
+                    )
+                    logger.info(f"DEBUG: memory_ids = {memory_ids}")
+
                     task_msg = TaskAssignment(
                         task_id=task_id,
                         node_id=node_id,
