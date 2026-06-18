@@ -6,6 +6,7 @@
 # 模型文件
 *.gguf
 model/
+models/
 
 # Python 缓存
 __pycache__/
@@ -15,3 +16,5 @@ __pycache__/
 # 本地配置文件（如果有）
 .env
 config.local.yaml
+.vscode/
+*.sh

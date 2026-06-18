@@ -1,3 +1,6 @@
 pydantic
 websockets
 llama-cpp-python
+sentence-transformers
+numpy
+faiss-cpu
